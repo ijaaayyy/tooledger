@@ -56,6 +56,8 @@ export default function RegisterPage() {
         title: "Account created!",
         description: "Welcome to ToolLedger. You can now borrow equipment.",
       });
+      // After successful registration, navigate to the student panel
+      setLocation("/");
     } catch (error) {
       toast({
         title: "Registration failed",

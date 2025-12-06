@@ -129,6 +129,12 @@ export async function registerRoutes(
 
   app.post("/api/auth/logout", (req, res) => {
     req.session.destroy((err) => {
+      // Clear common session cookie names so client no longer sends the cookie
+      try {
+        res.clearCookie('connect.sid');
+        res.clearCookie('toolledger.sid');
+      } catch (e) {}
+
       if (err) {
         return res.status(500).json({ message: "Logout failed" });
       }

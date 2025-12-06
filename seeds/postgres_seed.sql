@@ -38,8 +38,8 @@ WITH admin AS (
   INSERT INTO users (email, password, name, role, student_id)
   VALUES (
     'admin@example.com',
-    -- plaintext password (INSECURE). Set to 'AdminPassword123' by default.
-    'AdminPassword123',
+    -- plaintext password (INSECURE). Set to 'AdminPass123' by default.
+    'AdminPass123',
     'Site Admin',
     'admin',
     NULL
@@ -53,7 +53,7 @@ WITH admin AS (
 ),
 alice AS (
   INSERT INTO users (email, password, name, role, student_id)
-  VALUES ('alice@student.edu', 'AdminPassword123', 'Alice Santos', 'student', 'S-1001')
+  VALUES ('alice@student.edu', 'AdminPass123', 'Alice Santos', 'student', 'S-1001')
   ON CONFLICT (email) DO UPDATE SET
     password = EXCLUDED.password,
     name = EXCLUDED.name,
@@ -63,7 +63,7 @@ alice AS (
 ),
 bob AS (
   INSERT INTO users (email, password, name, role, student_id)
-  VALUES ('bob@student.edu', 'AdminPassword123', 'Bob Reyes', 'student', 'S-1002')
+  VALUES ('bob@student.edu', 'AdminPass123', 'Bob Reyes', 'student', 'S-1002')
   ON CONFLICT (email) DO UPDATE SET
     password = EXCLUDED.password,
     name = EXCLUDED.name,
