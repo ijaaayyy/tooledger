@@ -85,14 +85,56 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
+  // prefer an explicit HOST env var; default to localhost to avoid
+  // environments where binding to 0.0.0.0 is unsupported
+  const host = process.env.HOST || "127.0.0.1";
+
+  // Try listening. If the environment disallows the requested host
+  // (eg. ENOTSUP on 0.0.0.0 in some sandboxes), retry on localhost.
+  let attemptedHost = host;
+
+  const tryListen = (listenHost?: string) => {
+    if (!listenHost) {
+      // let Node pick the address — avoids ENOTSUP in some sandboxes
+      return httpServer.listen(port, () => {
+        log(`serving on ${port}`);
+      });
+    }
+
+    // use hostname form when a host is explicitly requested
+    return httpServer.listen(port, listenHost, () => {
+      log(`serving on ${listenHost}:${port}`);
+    });
+  };
+
+  // Handle asynchronous listen errors (prevents uncaught 'error' events)
+  httpServer.on("error", (err: any) => {
+    if (err && (err.code === "ENOTSUP" || err.code === "EADDRNOTAVAIL")) {
+      if (attemptedHost !== "127.0.0.1") {
+        log(`failed to bind to ${attemptedHost}:${port} (${err.code}), retrying without host`);
+        attemptedHost = undefined as unknown as string;
+        tryListen();
+        return;
+      }
+    }
+
+    console.error(err);
+    process.exit(1);
+  });
+
+  // initial listen attempt (try without host first, then with host)
+  try {
+    // Try without specifying host first
+    attemptedHost = undefined as unknown as string;
+    tryListen();
+  } catch (err: any) {
+    // If that fails synchronously, retry with the configured host
+    if (err && (err.code === "ENOTSUP" || err.code === "EADDRNOTAVAIL")) {
+      log(`initial bind without host failed (${err.code}), retrying on ${host}`);
+      attemptedHost = host;
+      tryListen(host);
+    } else {
+      throw err;
+    }
+  }
 })();

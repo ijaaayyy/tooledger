@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertBorrowRequestSchema, insertEquipmentSchema, loginSchema, registerSchema } from "@shared/schema";
-import bcrypt from "bcryptjs";
+// Using plaintext passwords by request (INSECURE). Passwords are stored and compared as-is.
 import session from "express-session";
 import { z } from "zod";
 import connectPgSimple from "connect-pg-simple";
@@ -71,10 +71,10 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Email already registered" });
       }
 
-      const hashedPassword = await bcrypt.hash(data.password, 10);
+      // NOTE: Storing plaintext password (INSECURE). This was requested to avoid hashing conflicts.
       const user = await storage.createUser({
         ...data,
-        password: hashedPassword,
+        password: data.password,
         role: "student",
       });
 
@@ -83,6 +83,8 @@ export async function registerRoutes(
       const { password: _, ...userWithoutPassword } = user;
       res.json({ user: userWithoutPassword });
     } catch (error) {
+      // Log the error for easier debugging (will appear in server console)
+      console.error('Registration error:', error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: error.errors[0].message });
       }
@@ -99,8 +101,15 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Invalid email or password" });
       }
 
-      const validPassword = await bcrypt.compare(data.password, user.password);
-      if (!validPassword) {
+      // Debug: log password lengths to help diagnose mismatches (removed later)
+      if (process.env.NODE_ENV !== 'production') {
+        try {
+          console.log('Login debug:', { email: data.email, providedLen: data.password.length, providedRaw: JSON.stringify(data.password), dbLen: user.password ? String(user.password).length : 0, dbRaw: JSON.stringify(user.password) });
+        } catch (e) {}
+      }
+
+      // Plaintext password comparison (INSECURE).
+      if (data.password !== user.password) {
         return res.status(401).json({ message: "Invalid email or password" });
       }
 
@@ -109,6 +118,8 @@ export async function registerRoutes(
       const { password: _, ...userWithoutPassword } = user;
       res.json({ user: userWithoutPassword });
     } catch (error) {
+      // Log the error for easier debugging (will appear in server console)
+      console.error('Login error:', error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: error.errors[0].message });
       }
