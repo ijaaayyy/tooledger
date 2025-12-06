@@ -57,7 +57,12 @@ export default function RegisterPage() {
         description: "Welcome to ToolLedger. You can now borrow equipment.",
       });
       // After successful registration, navigate to the student panel
+      // Use a full reload to ensure the session cookie is sent and the app picks up the authenticated session.
       setLocation("/");
+      if (typeof window !== 'undefined') {
+        // replace (no history entry) and reload to ensure server-set cookie is present
+        window.location.replace('/');
+      }
     } catch (error) {
       toast({
         title: "Registration failed",

@@ -79,6 +79,14 @@ export async function registerRoutes(
       });
 
       req.session.userId = user.id;
+      // Persist login metadata: timestamp, IP and user-agent
+      try {
+        const ip = (req.headers['x-forwarded-for'] as string) || req.ip || null;
+        const ua = (req.headers['user-agent'] as string) || null;
+        await storage.updateUserLoginInfo(user.id, new Date(), ip, ua);
+      } catch (e) {
+        console.error('Failed to update user login info:', e);
+      }
       
       const { password: _, ...userWithoutPassword } = user;
       res.json({ user: userWithoutPassword });
@@ -238,10 +246,30 @@ export async function registerRoutes(
 
   app.post("/api/borrow-requests", requireAuth, async (req, res) => {
     try {
-      const data = insertBorrowRequestSchema.parse({
-        ...req.body,
-        userId: req.session.userId,
+      // Validate incoming payload from client (accept ISO date strings)
+      const borrowSchema = z.object({
+        equipmentId: z.string().min(1, "Please select an equipment"),
+        quantity: z.number().int().min(1, "Quantity must be at least 1"),
+        purpose: z.string().min(1, "Please describe purpose"),
+        borrowDate: z.string().min(1, "Please provide a borrow date"),
+        expectedReturnDate: z.string().min(1, "Please provide an expected return date"),
       });
+
+      // log the raw body for diagnostics in case of validation issues
+      if (process.env.NODE_ENV !== 'production') {
+        try { console.log('Borrow request body:', req.body); } catch (e) {}
+      }
+
+      const parsed = borrowSchema.parse(req.body);
+
+      const data = {
+        userId: req.session.userId,
+        equipmentId: parsed.equipmentId,
+        quantity: parsed.quantity,
+        purpose: parsed.purpose,
+        borrowDate: new Date(parsed.borrowDate),
+        expectedReturnDate: new Date(parsed.expectedReturnDate),
+      };
 
       const equip = await storage.getEquipmentById(data.equipmentId);
       if (!equip) {
@@ -250,11 +278,12 @@ export async function registerRoutes(
       if (equip.availableQuantity < data.quantity) {
         return res.status(400).json({ message: "Not enough equipment available" });
       }
-
-      const request = await storage.createBorrowRequest(data);
+      const request = await storage.createBorrowRequest(data as any);
       res.json(request);
     } catch (error) {
+      console.error('Create borrow request error:', error);
       if (error instanceof z.ZodError) {
+        // return the first validation message
         return res.status(400).json({ message: error.errors[0].message });
       }
       res.status(500).json({ message: "Failed to create request" });
@@ -272,6 +301,23 @@ export async function registerRoutes(
       if (!request) {
         return res.status(404).json({ message: "Request not found" });
       }
+      // send approval email (best-effort)
+      try {
+        const { sendApprovalEmail } = await import("./mailer");
+        const to = request.user?.email;
+        if (to) {
+          await sendApprovalEmail({
+            to,
+            studentName: request.user.name || request.user.email,
+            itemName: request.equipment?.name || 'Equipment',
+            borrowDate: request.borrowDate,
+            expectedReturnDate: request.expectedReturnDate,
+          });
+        }
+      } catch (mailErr) {
+        console.error('Failed to send approval email:', mailErr);
+      }
+
       res.json(request);
     } catch (error) {
       if (error instanceof Error) {
@@ -316,6 +362,23 @@ export async function registerRoutes(
       if (!request) {
         return res.status(404).json({ message: "Request not found" });
       }
+      // send return confirmation email (best-effort)
+      try {
+        const { sendReturnEmail } = await import("./mailer");
+        const to = request.user?.email;
+        if (to) {
+          await sendReturnEmail({
+            to,
+            studentName: request.user.name || request.user.email,
+            itemName: request.equipment?.name || 'Equipment',
+            borrowDate: request.borrowDate,
+            returnDate: request.actualReturnDate || new Date(),
+          });
+        }
+      } catch (mailErr) {
+        console.error('Failed to send return email:', mailErr);
+      }
+
       res.json(request);
     } catch (error) {
       if (error instanceof Error && error.message.includes("Invalid status transition")) {

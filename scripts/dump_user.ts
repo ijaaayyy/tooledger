@@ -21,7 +21,7 @@ async function main() {
   await loadEnv();
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
-  const res = await client.query("SELECT id, email, password, role FROM users WHERE email = $1", ['admin@example.com']);
+  const res = await client.query("SELECT id, email, password, role, last_login, last_login_ip, last_user_agent FROM users WHERE email = $1", ['admin@example.com']);
   console.log('rows:', res.rows);
   await client.end();
 }

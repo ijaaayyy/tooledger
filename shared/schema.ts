@@ -14,6 +14,9 @@ export const users = pgTable("users", {
   role: userRoleEnum("role").notNull().default("student"),
   studentId: text("student_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  lastLogin: timestamp("last_login"),
+  lastLoginIp: text("last_login_ip"),
+  lastUserAgent: text("last_user_agent"),
 });
 
 export const equipment = pgTable("equipment", {
