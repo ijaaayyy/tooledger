@@ -56,12 +56,10 @@ export default function RegisterPage() {
         title: "Account created!",
         description: "Welcome to ToolLedger. You can now borrow equipment.",
       });
-      // After successful registration, navigate to the student panel
-      // Use a full reload to ensure the session cookie is sent and the app picks up the authenticated session.
+      // go to the student's dashboard and reload so server session/cookie is applied
       setLocation("/");
-      if (typeof window !== 'undefined') {
-        // replace (no history entry) and reload to ensure server-set cookie is present
-        window.location.replace('/');
+      if (typeof window !== "undefined") {
+        window.location.replace("/");
       }
     } catch (error) {
       toast({

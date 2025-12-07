@@ -7,6 +7,7 @@ import session from "express-session";
 import { z } from "zod";
 import connectPgSimple from "connect-pg-simple";
 import { pool } from "./db";
+import { sendMail, approveEmailBody } from './mailer';
 
 declare module "express-session" {
   interface SessionData {

@@ -42,6 +42,11 @@ export default function LoginPage() {
         title: "Welcome back!",
         description: "You have successfully logged in.",
       });
+      // navigate to student dashboard and reload to ensure session cookie is active
+      setLocation("/");
+      if (typeof window !== "undefined") {
+        window.location.replace("/");
+      }
     } catch (error) {
       toast({
         title: "Login failed",
