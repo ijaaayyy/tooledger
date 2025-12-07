@@ -302,21 +302,44 @@ export async function registerRoutes(
       if (!request) {
         return res.status(404).json({ message: "Request not found" });
       }
-      // send approval email (best-effort)
+      // send approval email + return reminder (best-effort)
       try {
-        const { sendApprovalEmail } = await import("./mailer");
+        const { sendApprovalEmail, sendReturnEmail } = await import("./mailer");
         const to = request.user?.email;
         if (to) {
+          // Cast to any to safely read optional / added fields that may not be declared on the type
+          const r: any = request;
+          const pickupLocation = r.pickupLocation ?? r.pickup_location ?? undefined;
+          const pickupWindow = r.pickupWindow ?? r.pickup_window ?? undefined;
+          const notes = r.notes ?? r.adminNotes ?? r.note ?? undefined;
+          const borrowDate = r.borrowDate ?? r.borrow_date ?? undefined;
+          const expectedReturnDate = r.expectedReturnDate ?? r.expected_return_date ?? undefined;
+
           await sendApprovalEmail({
             to,
             studentName: request.user.name || request.user.email,
-            itemName: request.equipment?.name || 'Equipment',
-            borrowDate: request.borrowDate,
-            expectedReturnDate: request.expectedReturnDate,
+            itemName: request.equipment?.name || "Equipment",
+            borrowDate,
+            expectedReturnDate,
+            pickupLocation,
+            pickupWindow,
+            requestId: request.id,
+            approveUrl: `${process.env.FRONTEND_BASE_URL ?? ""}/requests/${request.id}`,
+            notes,
+          });
+
+          // send separate return reminder (best-effort)
+          await sendReturnEmail({
+            to,
+            studentName: request.user.name || request.user.email,
+            itemName: request.equipment?.name || "Equipment",
+            borrowDate,
+            returnDate: expectedReturnDate,
+            requestId: request.id,
           });
         }
       } catch (mailErr) {
-        console.error('Failed to send approval email:', mailErr);
+        console.error("Failed to send approval email:", mailErr);
       }
 
       res.json(request);
@@ -363,21 +386,20 @@ export async function registerRoutes(
       if (!request) {
         return res.status(404).json({ message: "Request not found" });
       }
-      // send return confirmation email (best-effort)
+      // send thank-you email (best-effort)
       try {
-        const { sendReturnEmail } = await import("./mailer");
+        const { sendThankYouEmail } = await import("./mailer");
         const to = request.user?.email;
         if (to) {
-          await sendReturnEmail({
+          await sendThankYouEmail({
             to,
             studentName: request.user.name || request.user.email,
             itemName: request.equipment?.name || 'Equipment',
-            borrowDate: request.borrowDate,
-            returnDate: request.actualReturnDate || new Date(),
+            requestId: request.id,
           });
         }
       } catch (mailErr) {
-        console.error('Failed to send return email:', mailErr);
+        console.error('Failed to send return/thank-you email:', mailErr);
       }
 
       res.json(request);
