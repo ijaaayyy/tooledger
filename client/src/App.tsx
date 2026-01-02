@@ -9,7 +9,9 @@ import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import RegisterPage from "@/pages/register";
 import StudentDashboard from "@/pages/student-dashboard";
+import StudentWelcome from "@/pages/student-welcome";
 import AdminLayout from "@/pages/admin/layout";
+import AdminWelcome from "@/pages/admin/welcome";
 import { Loader2 } from "lucide-react";
 
 function AuthenticatedRoutes() {
@@ -39,19 +41,32 @@ function AuthenticatedRoutes() {
     );
   }
 
+  // Admin routing
   if (user.role === "admin") {
-    if (!location.startsWith("/admin")) {
-      return <Redirect to="/admin" />;
-    }
-    return <AdminLayout />;
+    return (
+      <Switch>
+        <Route path="/admin/welcome" component={AdminWelcome} />
+        <Route path="/admin/:rest*">
+          <AdminLayout />
+        </Route>
+        <Route path="/admin">
+          <AdminLayout />
+        </Route>
+        <Route>
+          <Redirect to="/admin/welcome" />
+        </Route>
+      </Switch>
+    );
   }
 
+  // Student routing
   if (location.startsWith("/admin")) {
     return <Redirect to="/" />;
   }
 
   return (
     <Switch>
+      <Route path="/welcome" component={StudentWelcome} />
       <Route path="/" component={StudentDashboard} />
       <Route component={NotFound} />
     </Switch>
