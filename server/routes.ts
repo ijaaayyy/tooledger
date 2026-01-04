@@ -20,12 +20,12 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   const PgSession = connectPgSimple(session);
-  
+
   const sessionSecret = process.env.SESSION_SECRET;
   if (!sessionSecret && process.env.NODE_ENV === "production") {
     throw new Error("SESSION_SECRET environment variable is required in production");
   }
-  
+
   app.use(
     session({
       store: new PgSession({
@@ -66,7 +66,7 @@ export async function registerRoutes(
   app.post("/api/auth/register", async (req, res) => {
     try {
       const data = registerSchema.parse(req.body);
-      
+
       const existingUser = await storage.getUserByEmail(data.email);
       if (existingUser) {
         return res.status(400).json({ message: "Email already registered" });
@@ -88,7 +88,7 @@ export async function registerRoutes(
       } catch (e) {
         console.error('Failed to update user login info:', e);
       }
-      
+
       const { password: _, ...userWithoutPassword } = user;
       res.json({ user: userWithoutPassword });
     } catch (error) {
@@ -104,7 +104,7 @@ export async function registerRoutes(
   app.post("/api/auth/login", async (req, res) => {
     try {
       const data = loginSchema.parse(req.body);
-      
+
       const user = await storage.getUserByEmail(data.email);
       if (!user) {
         return res.status(401).json({ message: "Invalid email or password" });
@@ -114,7 +114,7 @@ export async function registerRoutes(
       if (process.env.NODE_ENV !== 'production') {
         try {
           console.log('Login debug:', { email: data.email, providedLen: data.password.length, providedRaw: JSON.stringify(data.password), dbLen: user.password ? String(user.password).length : 0, dbRaw: JSON.stringify(user.password) });
-        } catch (e) {}
+        } catch (e) { }
       }
 
       // Plaintext password comparison (INSECURE).
@@ -123,7 +123,7 @@ export async function registerRoutes(
       }
 
       req.session.userId = user.id;
-      
+
       const { password: _, ...userWithoutPassword } = user;
       res.json({ user: userWithoutPassword });
     } catch (error) {
@@ -142,7 +142,7 @@ export async function registerRoutes(
       try {
         res.clearCookie('connect.sid');
         res.clearCookie('toolledger.sid');
-      } catch (e) {}
+      } catch (e) { }
 
       if (err) {
         return res.status(500).json({ message: "Logout failed" });
@@ -155,12 +155,12 @@ export async function registerRoutes(
     if (!req.session.userId) {
       return res.status(401).json({ message: "Not authenticated" });
     }
-    
+
     const user = await storage.getUser(req.session.userId);
     if (!user) {
       return res.status(401).json({ message: "User not found" });
     }
-    
+
     const { password: _, ...userWithoutPassword } = user;
     res.json({ user: userWithoutPassword });
   });
@@ -227,7 +227,7 @@ export async function registerRoutes(
   app.get("/api/borrow-requests", requireAdmin, async (req, res) => {
     try {
       const status = req.query.status as string | undefined;
-      const requests = status 
+      const requests = status
         ? await storage.getBorrowRequestsByStatus(status)
         : await storage.getBorrowRequests();
       res.json(requests);
@@ -258,7 +258,7 @@ export async function registerRoutes(
 
       // log the raw body for diagnostics in case of validation issues
       if (process.env.NODE_ENV !== 'production') {
-        try { console.log('Borrow request body:', req.body); } catch (e) {}
+        try { console.log('Borrow request body:', req.body); } catch (e) { }
       }
 
       const parsed = borrowSchema.parse(req.body);
@@ -294,8 +294,8 @@ export async function registerRoutes(
   app.patch("/api/borrow-requests/:id/approve", requireAdmin, async (req: any, res) => {
     try {
       const request = await storage.updateBorrowRequestStatus(
-        req.params.id, 
-        "approved", 
+        req.params.id,
+        "approved",
         req.user.id,
         req.body.notes
       );
@@ -345,9 +345,9 @@ export async function registerRoutes(
       res.json(request);
     } catch (error) {
       if (error instanceof Error) {
-        if (error.message.includes("Invalid status transition") || 
-            error.message.includes("Not enough equipment") ||
-            error.message.includes("Equipment not found")) {
+        if (error.message.includes("Invalid status transition") ||
+          error.message.includes("Not enough equipment") ||
+          error.message.includes("Equipment not found")) {
           return res.status(400).json({ message: error.message });
         }
       }
@@ -358,8 +358,8 @@ export async function registerRoutes(
   app.patch("/api/borrow-requests/:id/decline", requireAdmin, async (req: any, res) => {
     try {
       const request = await storage.updateBorrowRequestStatus(
-        req.params.id, 
-        "declined", 
+        req.params.id,
+        "declined",
         req.user.id,
         req.body.notes
       );
@@ -378,8 +378,8 @@ export async function registerRoutes(
   app.patch("/api/borrow-requests/:id/return", requireAdmin, async (req: any, res) => {
     try {
       const request = await storage.updateBorrowRequestStatus(
-        req.params.id, 
-        "returned", 
+        req.params.id,
+        "returned",
         req.user.id,
         req.body.notes
       );
@@ -408,6 +408,19 @@ export async function registerRoutes(
         return res.status(400).json({ message: error.message });
       }
       res.status(500).json({ message: "Failed to record return" });
+    }
+  });
+
+  app.delete("/api/borrow-requests/:id", requireAdmin, async (req, res) => {
+    try {
+      const deleted = await storage.deleteBorrowRequest(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Request not found" });
+      }
+      res.json({ message: "Request deleted successfully" });
+    } catch (error) {
+      console.error("Delete borrow request error:", error);
+      res.status(500).json({ message: "Failed to delete request" });
     }
   });
 

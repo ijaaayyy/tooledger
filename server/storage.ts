@@ -1,7 +1,7 @@
-import { 
-  type User, 
-  type InsertUser, 
-  type Equipment, 
+import {
+  type User,
+  type InsertUser,
+  type Equipment,
   type InsertEquipment,
   type BorrowRequest,
   type InsertBorrowRequest,
@@ -18,25 +18,26 @@ export interface IStorage {
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUserLoginInfo(id: string, lastLogin: Date, ip?: string | null, userAgent?: string | null): Promise<User | undefined>;
-  
+
   getEquipment(): Promise<Equipment[]>;
   getEquipmentById(id: string): Promise<Equipment | undefined>;
   getLowStockEquipment(): Promise<Equipment[]>;
   createEquipment(item: InsertEquipment): Promise<Equipment>;
   updateEquipment(id: string, item: Partial<InsertEquipment>): Promise<Equipment | undefined>;
   deleteEquipment(id: string): Promise<boolean>;
-  
+
   getBorrowRequests(): Promise<BorrowRequestWithDetails[]>;
   getBorrowRequestsByUser(userId: string): Promise<BorrowRequestWithDetails[]>;
   getBorrowRequestsByStatus(status: string): Promise<BorrowRequestWithDetails[]>;
   createBorrowRequest(request: InsertBorrowRequest): Promise<BorrowRequest>;
   updateBorrowRequestStatus(
-    id: string, 
-    status: "approved" | "declined" | "returned", 
+    id: string,
+    status: "approved" | "declined" | "returned",
     adminId: string,
     notes?: string
   ): Promise<BorrowRequestWithDetails | undefined>;
-  
+  deleteBorrowRequest(id: string): Promise<boolean>;
+
   getDashboardStats(): Promise<{
     pendingRequests: number;
     activeBorrows: number;
@@ -145,8 +146,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateBorrowRequestStatus(
-    id: string, 
-    status: "approved" | "declined" | "returned", 
+    id: string,
+    status: "approved" | "declined" | "returned",
     adminId: string,
     notes?: string
   ): Promise<BorrowRequestWithDetails | undefined> {
@@ -156,7 +157,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const previousStatus = existingRequest.status;
-    
+
     if (previousStatus === status) {
       const result = await db.query.borrowRequests.findFirst({
         where: eq(borrowRequests.id, id),
@@ -210,12 +211,12 @@ export class DatabaseStorage implements IStorage {
     const equip = await this.getEquipmentById(existingRequest.equipmentId);
     if (equip) {
       if (status === "approved" && previousStatus === "pending") {
-        await this.updateEquipment(equip.id, { 
-          availableQuantity: Math.max(0, equip.availableQuantity - existingRequest.quantity) 
+        await this.updateEquipment(equip.id, {
+          availableQuantity: Math.max(0, equip.availableQuantity - existingRequest.quantity)
         });
       } else if (status === "returned" && previousStatus === "approved") {
-        await this.updateEquipment(equip.id, { 
-          availableQuantity: Math.min(equip.totalQuantity, equip.availableQuantity + existingRequest.quantity) 
+        await this.updateEquipment(equip.id, {
+          availableQuantity: Math.min(equip.totalQuantity, equip.availableQuantity + existingRequest.quantity)
         });
       }
     }
@@ -227,16 +228,61 @@ export class DatabaseStorage implements IStorage {
     return result as BorrowRequestWithDetails | undefined;
   }
 
+  async deleteBorrowRequest(id: string): Promise<boolean> {
+    console.log(`[Storage] DELETING request ${id}`);
+
+    try {
+      // First, get the request to check if we need to restore equipment quantity
+      const [existingRequest] = await db.select().from(borrowRequests).where(eq(borrowRequests.id, id));
+      if (!existingRequest) {
+        console.log(`[Storage] Request ${id} not found for deletion`);
+        return false;
+      }
+
+      // If the request was approved, restore the equipment quantity
+      if (existingRequest.status === "approved") {
+        console.log(`[Storage] Restoring equipment for approved request ${id}`);
+        // Restore quantity logic - wrapped in try catch to avoid blocking delete
+        try {
+          const equip = await this.getEquipmentById(existingRequest.equipmentId);
+          if (equip) {
+            await this.updateEquipment(equip.id, {
+              availableQuantity: Math.min(equip.totalQuantity, equip.availableQuantity + existingRequest.quantity)
+            });
+          }
+        } catch (eqError) {
+          console.error(`[Storage] Failed to restore equipment quantity: ${eqError}`);
+        }
+      }
+
+      // Delete the request
+      await db.delete(borrowRequests).where(eq(borrowRequests.id, id));
+
+      // Verification check
+      const check = await db.select().from(borrowRequests).where(eq(borrowRequests.id, id));
+      if (check.length === 0) {
+        console.log(`[Storage] VERIFIED DELETED ${id}`);
+        return true;
+      } else {
+        console.error(`[Storage] FAILED TO DELETE ${id} - Row still exists`);
+        return false;
+      }
+    } catch (error) {
+      console.error(`[Storage] Error deleting request ${id}:`, error);
+      throw error;
+    }
+  }
+
   async getDashboardStats() {
     const allRequests = await db.select().from(borrowRequests);
     const allEquipment = await db.select().from(equipment);
-    
+
     const pendingRequests = allRequests.filter(r => r.status === "pending").length;
     const activeBorrows = allRequests.filter(r => r.status === "approved").length;
     const totalEquipment = allEquipment.length;
-    
+
     const now = new Date();
-    const overdueItems = allRequests.filter(r => 
+    const overdueItems = allRequests.filter(r =>
       r.status === "approved" && new Date(r.expectedReturnDate) < now
     ).length;
 

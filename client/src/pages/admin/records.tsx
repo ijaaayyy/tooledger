@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
   FileText,
@@ -16,7 +16,10 @@ import {
   Fingerprint,
   CheckCircle2,
   Clock,
-  Shield
+  Shield,
+  Trash2,
+  Loader2,
+  Info
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -38,9 +41,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import type { BorrowRequestWithDetails } from "@shared/schema";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 const container = {
   hidden: { opacity: 0 },
@@ -74,9 +87,103 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+interface DeleteDialogProps {
+  record: BorrowRequestWithDetails | null;
+  onClose: () => void;
+}
+
+function DeleteDialog({ record, onClose }: DeleteDialogProps) {
+  const { toast } = useToast();
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      if (!record) return;
+      return apiRequest("DELETE", `/api/borrow-requests/${record.id}`);
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ["/api/borrow-requests"] }),
+        queryClient.refetchQueries({ queryKey: ["/api/admin/stats"] }),
+        queryClient.refetchQueries({ queryKey: ["/api/equipment"] })
+      ]);
+      toast({
+        title: "Record Deleted",
+        description: "The borrower record has been permanently removed.",
+      });
+      onClose();
+    },
+    onError: (error) => {
+      toast({
+        title: "Deletion failed",
+        description: error instanceof Error ? error.message : "Could not delete record",
+        variant: "destructive",
+      });
+    },
+  });
+
+  return (
+    <Dialog open={!!record} onOpenChange={() => onClose()}>
+      <DialogContent className="sm:max-w-[425px] rounded-[2rem] border-none shadow-2xl">
+        <DialogHeader>
+          <DialogTitle className="text-2xl font-black tracking-tight text-destructive">Delete Record</DialogTitle>
+          <DialogDescription className="text-sm font-medium opacity-60">This action cannot be undone. The record will be permanently deleted from the archive.</DialogDescription>
+        </DialogHeader>
+
+        {record && (
+          <div className="space-y-4 pt-4">
+            <div className="rounded-2xl bg-destructive/5 dark:bg-destructive/10 p-5 space-y-3 border border-destructive/20">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-full bg-destructive/10 flex items-center justify-center font-black text-xs text-destructive">
+                  {record.user?.name?.[0]}
+                </div>
+                <span className="font-bold tracking-tight">{record.user?.name}</span>
+              </div>
+              <div className="flex items-center gap-3 text-sm text-muted-foreground font-medium">
+                <Package className="h-4 w-4 opacity-50" />
+                <span>{record.equipment?.name} <span className="text-destructive">({record.quantity}x)</span></span>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-medium">
+                <Calendar className="h-3 w-3 opacity-50" />
+                <span>{format(new Date(record.borrowDate), "MMM d, yyyy")}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3">
+              <Info className="h-4 w-4 text-yellow-600" />
+              <span>If this record was approved, the equipment quantity will be restored.</span>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="pt-4 gap-2">
+          <Button variant="ghost" onClick={onClose} className="rounded-xl font-bold uppercase tracking-widest text-[10px]" data-testid="button-cancel-delete-record">
+            Cancel
+          </Button>
+          <Button
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending}
+            variant="destructive"
+            className="rounded-xl font-black uppercase tracking-widest text-[10px] h-11 px-8 shadow-lg transition-all hover:scale-105"
+            data-testid="button-confirm-delete-record"
+          >
+            {mutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete Permanently
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function AdminRecords() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [deleteDialog, setDeleteDialog] = useState<BorrowRequestWithDetails | null>(null);
 
   const { data: records, isLoading } = useQuery<BorrowRequestWithDetails[]>({
     queryKey: ["/api/borrow-requests"],
@@ -215,7 +322,8 @@ export default function AdminRecords() {
                       <TableHead className="h-14 font-black text-[10px] uppercase tracking-widest text-muted-foreground text-center">Qty</TableHead>
                       <TableHead className="h-14 font-black text-[10px] uppercase tracking-widest text-muted-foreground">Duration</TableHead>
                       <TableHead className="h-14 font-black text-[10px] uppercase tracking-widest text-muted-foreground text-center">Status</TableHead>
-                      <TableHead className="h-14 font-black text-[10px] uppercase tracking-widest text-muted-foreground text-right pr-8">Returned On</TableHead>
+                      <TableHead className="h-14 font-black text-[10px] uppercase tracking-widest text-muted-foreground text-right">Returned On</TableHead>
+                      <TableHead className="h-14 font-black text-[10px] uppercase tracking-widest text-muted-foreground text-right pr-8">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -272,17 +380,28 @@ export default function AdminRecords() {
                             <StatusBadge status={record.status} />
                           </TableCell>
                           <TableCell className="py-5 text-right pr-8">
-                            {record.actualReturnDate ? (
-                              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-green-500/10 text-green-600 font-black text-[10px] uppercase tracking-widest border border-green-500/10">
-                                <CheckCircle2 className="h-3 w-3" />
-                                {format(new Date(record.actualReturnDate), "MMM d, yyyy")}
-                              </div>
-                            ) : (
-                              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-muted-foreground font-black text-[10px] uppercase tracking-widest opacity-40">
-                                <Clock className="h-3 w-3" />
-                                Still Out
-                              </div>
-                            )}
+                            <div className="flex items-center justify-end gap-3">
+                              {record.actualReturnDate ? (
+                                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-green-500/10 text-green-600 font-black text-[10px] uppercase tracking-widest border border-green-500/10">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  {format(new Date(record.actualReturnDate), "MMM d, yyyy")}
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-muted-foreground font-black text-[10px] uppercase tracking-widest opacity-40">
+                                  <Clock className="h-3 w-3" />
+                                  Still Out
+                                </div>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="rounded-xl h-8 w-8 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive transition-all"
+                                onClick={() => setDeleteDialog(record)}
+                                data-testid={`button-delete-record-${record.id}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </motion.tr>
                       ))}
@@ -304,6 +423,10 @@ export default function AdminRecords() {
           </div>
         </motion.div>
       )}
+      <DeleteDialog
+        record={deleteDialog}
+        onClose={() => setDeleteDialog(null)}
+      />
     </motion.div>
   );
 }

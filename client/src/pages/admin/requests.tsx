@@ -16,7 +16,8 @@ import {
   Info,
   Mail,
   Fingerprint,
-  ClipboardList
+  ClipboardList,
+  Trash2
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -79,6 +80,11 @@ interface ActionDialogProps {
   onClose: () => void;
 }
 
+interface DeleteDialogProps {
+  request: BorrowRequestWithDetails | null;
+  onClose: () => void;
+}
+
 function ActionDialog({ request, action, onClose }: ActionDialogProps) {
   const [notes, setNotes] = useState("");
   const { toast } = useToast();
@@ -88,10 +94,12 @@ function ActionDialog({ request, action, onClose }: ActionDialogProps) {
       if (!request || !action) return;
       return apiRequest("PATCH", `/api/borrow-requests/${request.id}/${action}`, { notes });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/borrow-requests"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ["/api/borrow-requests"] }),
+        queryClient.refetchQueries({ queryKey: ["/api/admin/stats"] }),
+        queryClient.refetchQueries({ queryKey: ["/api/equipment"] })
+      ]);
       toast({
         title: action === "approve" ? "Request Approved" :
           action === "decline" ? "Request Declined" :
@@ -196,12 +204,98 @@ function ActionDialog({ request, action, onClose }: ActionDialogProps) {
   );
 }
 
+function DeleteDialog({ request, onClose }: DeleteDialogProps) {
+  const { toast } = useToast();
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      if (!request) return;
+      return apiRequest("DELETE", `/api/borrow-requests/${request.id}`);
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ["/api/borrow-requests"] }),
+        queryClient.refetchQueries({ queryKey: ["/api/admin/stats"] }),
+        queryClient.refetchQueries({ queryKey: ["/api/equipment"] })
+      ]);
+      toast({
+        title: "Request Deleted",
+        description: "The borrow request has been permanently removed.",
+      });
+      onClose();
+    },
+    onError: (error) => {
+      toast({
+        title: "Deletion failed",
+        description: error instanceof Error ? error.message : "Could not delete request",
+        variant: "destructive",
+      });
+    },
+  });
+
+  return (
+    <Dialog open={!!request} onOpenChange={() => onClose()}>
+      <DialogContent className="sm:max-w-[425px] rounded-[2rem] border-none shadow-2xl">
+        <DialogHeader>
+          <DialogTitle className="text-2xl font-black tracking-tight text-destructive">Delete Request</DialogTitle>
+          <DialogDescription className="text-sm font-medium opacity-60">This action cannot be undone. The request will be permanently deleted.</DialogDescription>
+        </DialogHeader>
+
+        {request && (
+          <div className="space-y-4 pt-4">
+            <div className="rounded-2xl bg-destructive/5 dark:bg-destructive/10 p-5 space-y-3 border border-destructive/20">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-full bg-destructive/10 flex items-center justify-center font-black text-xs text-destructive">
+                  {request.user?.name?.[0]}
+                </div>
+                <span className="font-bold tracking-tight">{request.user?.name}</span>
+              </div>
+              <div className="flex items-center gap-3 text-sm text-muted-foreground font-medium">
+                <Package className="h-4 w-4 opacity-50" />
+                <span>{request.equipment?.name} <span className="text-destructive">({request.quantity}x)</span></span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3">
+              <Info className="h-4 w-4 text-yellow-600" />
+              <span>If this request was approved, the equipment quantity will be restored.</span>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="pt-4 gap-2">
+          <Button variant="ghost" onClick={onClose} className="rounded-xl font-bold uppercase tracking-widest text-[10px]" data-testid="button-cancel-delete">
+            Cancel
+          </Button>
+          <Button
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending}
+            variant="destructive"
+            className="rounded-xl font-black uppercase tracking-widest text-[10px] h-11 px-8 shadow-lg transition-all hover:scale-105"
+            data-testid="button-confirm-delete"
+          >
+            {mutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete Permanently
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function RequestCard({
   request,
-  onAction
+  onAction,
+  onDelete
 }: {
   request: BorrowRequestWithDetails;
   onAction: (request: BorrowRequestWithDetails, action: "approve" | "decline" | "return") => void;
+  onDelete: (request: BorrowRequestWithDetails) => void;
 }) {
   const isPending = request.status === "pending";
   const isApproved = request.status === "approved";
@@ -213,7 +307,7 @@ function RequestCard({
       data-testid={`request-card-${request.id}`}
     >
       <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-        <div className="flex gap-4">
+        <div className="flex gap-4 flex-1">
           <div className="h-14 w-14 rounded-[1.25rem] bg-gradient-to-tr from-neutral-100 to-neutral-50 dark:from-neutral-800 dark:to-neutral-900 flex items-center justify-center font-black text-xl text-primary border border-neutral-200/50 dark:border-neutral-700/50 group-hover:scale-110 transition-transform">
             {request.user?.name?.[0].toUpperCase()}
           </div>
@@ -237,45 +331,52 @@ function RequestCard({
           </div>
         </div>
 
-        {(isPending || isApproved) && (
-          <div className="flex gap-2 shrink-0 self-end md:self-auto">
-            {isPending && (
-              <>
-                <Button
-                  size="sm"
-                  className="rounded-xl h-10 px-4 font-black uppercase tracking-widest text-[10px] bg-primary shadow-lg shadow-primary/20 hover:scale-105 transition-transform"
-                  onClick={() => onAction(request, "approve")}
-                  data-testid="button-approve"
-                >
-                  <CheckCircle2 className="mr-2 h-3 w-3" />
-                  Approve
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="rounded-xl h-10 px-4 font-black uppercase tracking-widest text-[10px] text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => onAction(request, "decline")}
-                  data-testid="button-decline"
-                >
-                  <XCircle className="mr-2 h-3 w-3" />
-                  Decline
-                </Button>
-              </>
-            )}
-            {isApproved && (
+        <div className="flex gap-2 shrink-0 self-end md:self-auto">
+          {isPending && (
+            <>
               <Button
                 size="sm"
-                variant="outline"
-                className="rounded-xl h-10 px-6 font-black uppercase tracking-widest text-[10px] border-2 border-blue-600/20 text-blue-600 hover:bg-blue-600 hover:text-white transition-all shadow-lg shadow-blue-500/5"
-                onClick={() => onAction(request, "return")}
-                data-testid="button-return"
+                className="rounded-xl h-10 px-4 font-black uppercase tracking-widest text-[10px] bg-primary shadow-lg shadow-primary/20 hover:scale-105 transition-transform"
+                onClick={() => onAction(request, "approve")}
+                data-testid="button-approve"
               >
-                <RotateCcw className="mr-2 h-3 w-3" />
-                Record Return
+                <CheckCircle2 className="mr-2 h-3 w-3" />
+                Approve
               </Button>
-            )}
-          </div>
-        )}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="rounded-xl h-10 px-4 font-black uppercase tracking-widest text-[10px] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => onAction(request, "decline")}
+                data-testid="button-decline"
+              >
+                <XCircle className="mr-2 h-3 w-3" />
+                Decline
+              </Button>
+            </>
+          )}
+          {isApproved && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="rounded-xl h-10 px-6 font-black uppercase tracking-widest text-[10px] border-2 border-blue-600/20 text-blue-600 hover:bg-blue-600 hover:text-white transition-all shadow-lg shadow-blue-500/5"
+              onClick={() => onAction(request, "return")}
+              data-testid="button-return"
+            >
+              <RotateCcw className="mr-2 h-3 w-3" />
+              Record Return
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="rounded-xl h-10 px-3 font-black uppercase tracking-widest text-[10px] text-destructive hover:bg-destructive/10 hover:text-destructive transition-all"
+            onClick={() => onDelete(request)}
+            data-testid="button-delete"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -335,6 +436,7 @@ export default function AdminRequests() {
     request: BorrowRequestWithDetails | null;
     action: "approve" | "decline" | "return" | null;
   }>({ request: null, action: null });
+  const [deleteDialog, setDeleteDialog] = useState<BorrowRequestWithDetails | null>(null);
 
   const { data: requests, isLoading } = useQuery<BorrowRequestWithDetails[]>({
     queryKey: ["/api/borrow-requests"],
@@ -347,6 +449,10 @@ export default function AdminRequests() {
 
   const handleAction = (request: BorrowRequestWithDetails, action: "approve" | "decline" | "return") => {
     setActionDialog({ request, action });
+  };
+
+  const handleDelete = (request: BorrowRequestWithDetails) => {
+    setDeleteDialog(request);
   };
 
   return (
@@ -417,6 +523,7 @@ export default function AdminRequests() {
                   key={request.id}
                   request={request}
                   onAction={handleAction}
+                  onDelete={handleDelete}
                 />
               ))}
             </motion.div>
@@ -428,6 +535,10 @@ export default function AdminRequests() {
         request={actionDialog.request}
         action={actionDialog.action}
         onClose={() => setActionDialog({ request: null, action: null })}
+      />
+      <DeleteDialog
+        request={deleteDialog}
+        onClose={() => setDeleteDialog(null)}
       />
     </motion.div>
   );
